@@ -411,7 +411,7 @@ def math2word(text, lang, lang_iso1, tts_engine):
         text = re.sub(ambiguous_pattern, replace_ambiguous, text)
     # Regex pattern for detecting numbers (handles negatives, commas, decimals, scientific notation)
     number_pattern = r'\s*(-?\d{1,3}(?:,\d{3})*(?:\.\d+(?!\s|$))?(?:[eE][-+]?\d+)?)\s*'
-    if tts_engine == VITS or tts_engine == FAIRSEQ or tts_engine == YOURTTS:
+    if tts_engine in [TACOTRON2, VITS, FAIRSEQ, YOURTTS]:
         if is_num2words_compat:
             # Pattern 2: Split big numbers into groups of 4
             text = re.sub(r'(\d{4})(?=\d{4}(?!\.\d))', r'\1 ', text)
@@ -500,6 +500,10 @@ def convert2epub(session):
             print(error)
             return False
         file_input = session['ebook']
+        if os.path.getsize(file_input) == 0:
+            error = f"Input file is empty: {file_input}"
+            print(error)
+            return False
         file_ext = os.path.splitext(file_input)[1].lower()
         if file_ext not in ebook_formats:
             error = f'Unsupported file format: {file_ext}'
@@ -628,9 +632,6 @@ YOU CAN IMPROVE IT OR ASK TO A TRAINING MODEL EXPERT.
             sentences_array = filter_chapter(doc, session['language'], session['language_iso1'], session['tts_engine'])
             if sentences_array is not None:
                 chapters.append(sentences_array)
-        #if title:
-        #    if chapters[0]:
-        #        chapters[0][0] =  f' — "{title}" . {chapters[0][0]}'
         return toc, chapters
     except Exception as e:
         error = f'Error extracting main content pages: {e}'
@@ -729,9 +730,10 @@ def get_sentences(text, lang, tts_engine):
             import jieba
             return list(jieba.cut(text))
         elif lang == 'jpn':
-            import MeCab
-            mecab = MeCab.Tagger()
-            return mecab.parse(text).split()
+            from sudachipy import dictionary, tokenizer
+            sudachi = dictionary.Dictionary().create()
+            mode = tokenizer.Tokenizer.SplitMode.C
+            return [m.surface() for m in sudachi.tokenize(text, mode)]
         elif lang == 'kor':
             from konlpy.tag import Kkma
             kkma = Kkma()
@@ -1512,19 +1514,19 @@ def convert_ebook(args):
                         if vram_avail <= 4:
                             msg_extra += 'VRAM capacity could not be detected. -' if vram_avail == 0 else 'VRAM under 4GB - '
                             if session['tts_engine'] == BARK:
-                                os.environ["SUNO_USE_SMALL_MODELS"] = 'true'
+                                os.environ["SUNO_USE_SMALL_MODELS"] = 'True'
                                 msg_extra += f"Switching BARK to SMALL models - "
                         if session['device'] == 'cuda':
                             session['device'] = session['device'] if torch.cuda.is_available() else 'cpu'
                             if session['device'] == 'cpu':
-                                msg += f"GPU is not available or not recognized! Switching to CPU - "
+                                msg += f"GPU not recognized by torch! Read {default_gpu_wiki} - Switching to CPU - "
                         elif session['device'] == 'mps':
                             session['device'] = session['device'] if torch.backends.mps.is_available() else 'cpu'
                             if session['device'] == 'cpu':
-                                msg += f"MPS is not available on your device! - Switching to CPU - "
+                                msg += f"MPS not recognized by torch! Read {default_gpu_wiki} - Switching to CPU - "
                         if session['device'] == 'cpu':
                             if session['tts_engine'] == BARK:
-                                os.environ["SUNO_OFFLOAD_CPU"] = 'true'
+                                os.environ["SUNO_OFFLOAD_CPU"] = 'True'
                         if default_xtts_settings['use_deepspeed'] == True:
                             try:
                                 import deepspeed
@@ -2146,6 +2148,8 @@ def web_interface(args):
                 rating = default_xtts_settings['rating']
             elif tts_engine == BARK:
                 rating = default_bark_settings['rating']
+            elif tts_engine == TACOTRON2:
+                rating = default_tacotron_settings['rating']
             elif tts_engine == VITS:
                 rating = default_vits_settings['rating']
             elif tts_engine == FAIRSEQ:
@@ -2212,7 +2216,7 @@ def web_interface(args):
         def refresh_interface(id):
             session = context.get_session(id)
             session['status'] = None
-            return gr.update(interactive=False), gr.update(value=None), update_gr_audiobook_list(id), gr.update(value=session['audiobook']), gr.update(visible=False)
+            return gr.update(interactive=False), gr.update(value=None), update_gr_voice_list(id), update_gr_audiobook_list(id), gr.update(value=session['audiobook']), gr.update(visible=False)
 
         def change_gr_audiobook_list(selected, id):
             session = context.get_session(id)
@@ -2974,7 +2978,7 @@ def web_interface(args):
         ).then(
             fn=refresh_interface,
             inputs=[gr_session],
-            outputs=[gr_convert_btn, gr_ebook_file, gr_audiobook_list, gr_audiobook_player, gr_modal]
+            outputs=[gr_convert_btn, gr_ebook_file, gr_voice_list, gr_audiobook_list, gr_audiobook_player, gr_modal]
         )
         gr_write_data.change(
             fn=None,
