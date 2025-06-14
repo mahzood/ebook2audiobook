@@ -27,7 +27,8 @@ tqdm
 suno-bark
 unidic
 pymupdf4llm
+sudachipy
+sudachidict_core
 torch
-coqui-tts
+coqui-tts>=0.26.2
 torchvggish
-transformers<=4.51.3
